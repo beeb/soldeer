@@ -98,6 +98,9 @@ pub enum ConfigError {
 
     #[error("the version requirement string for {0} cannot contain the equal symbol for git dependencies and http dependencies with a custom URL")]
     InvalidVersionReq(String),
+
+    #[error("could not find soldeer config in {0}")]
+    ConfigNotFound(PathBuf),
 }
 
 #[derive(Error, Debug)]
