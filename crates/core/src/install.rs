@@ -3,10 +3,10 @@
 //! This module contains functions to install dependencies from the config object or from the
 //! lockfile. Dependencies can be installed in parallel.
 use crate::{
-    config::{Dependency, GitIdentifier},
+    config::{read_config_deps, read_soldeer_config, Dependency, GitIdentifier, Paths},
     download::{clone_repo, delete_dependency_files, download_file, unzip_file},
     errors::InstallError,
-    lock::{format_install_path, GitLockEntry, HttpLockEntry, LockEntry},
+    lock::{format_install_path, read_lockfile, GitLockEntry, HttpLockEntry, LockEntry},
     registry::{get_dependency_url_remote, get_latest_supported_version},
     utils::{canonicalize, hash_file, hash_folder, run_forge_command, run_git_command},
 };
@@ -42,25 +42,25 @@ pub enum DependencyStatus {
 
 /// Progress bars for the installation process.
 #[cfg(feature = "cli")]
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Progress {
     /// The multi progress bar object.
-    pub multi: MultiProgress,
+    pub multi: Option<MultiProgress>,
 
     /// Progress bar for calls to the API to retrieve the packages versions.
-    pub versions: ProgressBar,
+    pub versions: Option<ProgressBar>,
 
     /// Progress bar for downloading the dependencies.
-    pub downloads: ProgressBar,
+    pub downloads: Option<ProgressBar>,
 
     /// Progress bar for unzipping the downloaded files.
-    pub unzip: ProgressBar,
+    pub unzip: Option<ProgressBar>,
 
     /// Progress bar for installing subdependencies.
-    pub subdependencies: ProgressBar,
+    pub subdependencies: Option<ProgressBar>,
 
     /// Progress bar for checking the integrity of the installed dependencies.
-    pub integrity: ProgressBar,
+    pub integrity: Option<ProgressBar>,
 }
 
 #[cfg(feature = "cli")]
@@ -74,39 +74,46 @@ impl Progress {
         let unzip = multi.add(progress_bar(deps).with_template(PROGRESS_TEMPLATE));
         let subdependencies = multi.add(progress_bar(deps).with_template(PROGRESS_TEMPLATE));
         let integrity = multi.add(progress_bar(deps).with_template(PROGRESS_TEMPLATE));
-        Self { multi: multi.clone(), versions, downloads, unzip, subdependencies, integrity }
+        Self {
+            multi: Some(multi.clone()),
+            versions: Some(versions),
+            downloads: Some(downloads),
+            unzip: Some(unzip),
+            subdependencies: Some(subdependencies),
+            integrity: Some(integrity),
+        }
     }
 
     /// Start all progress bars.
     pub fn start_all(&self) {
-        self.versions.start("Retrieving versions...");
-        self.downloads.start("Downloading dependencies...");
-        self.unzip.start("Unzipping dependencies...");
-        self.subdependencies.start("Installing subdependencies...");
-        self.integrity.start("Checking integrity...");
+        self.versions.as_ref().inspect(|p| p.start("Retrieving versions..."));
+        self.downloads.as_ref().inspect(|p| p.start("Downloading dependencies..."));
+        self.unzip.as_ref().inspect(|p| p.start("Unzipping dependencies..."));
+        self.subdependencies.as_ref().inspect(|p| p.start("Installing subdependencies..."));
+        self.integrity.as_ref().inspect(|p| p.start("Checking integrity..."));
     }
 
     /// Increment all progress bars by one.
     pub fn increment_all(&self) {
-        self.versions.inc(1);
-        self.downloads.inc(1);
-        self.unzip.inc(1);
-        self.subdependencies.inc(1);
-        self.integrity.inc(1);
+        self.versions.as_ref().inspect(|p| p.inc(1));
+        self.downloads.as_ref().inspect(|p| p.inc(1));
+        self.unzip.as_ref().inspect(|p| p.inc(1));
+        self.subdependencies.as_ref().inspect(|p| p.inc(1));
+        self.integrity.as_ref().inspect(|p| p.inc(1));
     }
 
     /// Stop all progress bars.
     pub fn stop_all(&self) {
-        self.versions.stop("Done retrieving versions");
-        self.downloads.stop("Done downloading dependencies");
-        self.unzip.stop("Done unzipping dependencies");
-        self.subdependencies.stop("Done installing subdependencies");
-        self.integrity.stop("Done checking integrity");
+        self.versions.as_ref().inspect(|p| p.stop("Done retrieving versions"));
+        self.downloads.as_ref().inspect(|p| p.stop("Done downloading dependencies"));
+        self.unzip.as_ref().inspect(|p| p.stop("Done unzipping dependencies"));
+        self.subdependencies.as_ref().inspect(|p| p.stop("Done installing subdependencies"));
+        self.integrity.as_ref().inspect(|p| p.stop("Done checking integrity"));
     }
 
     /// Log a message above the multiprogress bar.
     pub fn log(&self, msg: impl fmt::Display) {
-        self.multi.println(msg);
+        self.multi.as_ref().inspect(|p| p.println(msg));
     }
 }
 
@@ -273,7 +280,7 @@ pub async fn install_dependency(
                     delete_dependency_files(dependency, &deps).await?;
                     // we won't need to retrieve the version number so we mark it as done
                     #[cfg(feature = "cli")]
-                    progress.versions.inc(1);
+                    progress.versions.as_ref().inspect(|p| p.inc(1));
                 }
                 Dependency::Git(_) => {
                     #[cfg(feature = "cli")]
@@ -303,7 +310,7 @@ pub async fn install_dependency(
                 }
                 // we won't need to retrieve the version number so we mark it as done
                 #[cfg(feature = "cli")]
-                progress.versions.inc(1);
+                progress.versions.as_ref().inspect(|p| p.inc(1));
             }
         }
         install_dependency_inner(
@@ -338,7 +345,7 @@ pub async fn install_dependency(
         };
         // indicate that we have retrieved the version number
         #[cfg(feature = "cli")]
-        progress.versions.inc(1);
+        progress.versions.as_ref().inspect(|p| p.inc(1));
 
         let info = match &dependency {
             Dependency::Http(dep) => {
@@ -407,7 +414,7 @@ async fn install_dependency_inner(
             )
             .await?;
             #[cfg(feature = "cli")]
-            progress.downloads.inc(1);
+            progress.downloads.as_ref().inspect(|p| p.inc(1));
 
             let zip_integrity = tokio::task::spawn_blocking({
                 let zip_path = zip_path.clone();
@@ -426,18 +433,18 @@ async fn install_dependency_inner(
             }
             unzip_file(&zip_path, path).await?;
             #[cfg(feature = "cli")]
-            progress.unzip.inc(1);
+            progress.unzip.as_ref().inspect(|p| p.inc(1));
 
             if subdependencies {
                 install_subdependencies(path).await?;
             }
             #[cfg(feature = "cli")]
-            progress.subdependencies.inc(1);
+            progress.subdependencies.as_ref().inspect(|p| p.inc(1));
 
             let integrity = hash_folder(path)
                 .map_err(|e| InstallError::IOError { path: path.to_path_buf(), source: e })?;
             #[cfg(feature = "cli")]
-            progress.integrity.inc(1);
+            progress.integrity.as_ref().inspect(|p| p.inc(1));
 
             Ok(HttpLockEntry::builder()
                 .name(&dep.name)
@@ -453,16 +460,16 @@ async fn install_dependency_inner(
             // clone the default branch
             let commit = clone_repo(&dep.git, dep.identifier.as_ref(), &path).await?;
             #[cfg(feature = "cli")]
-            progress.downloads.inc(1);
+            progress.downloads.as_ref().inspect(|p| p.inc(1));
 
             if subdependencies {
                 install_subdependencies(&path).await?;
             }
             #[cfg(feature = "cli")]
             {
-                progress.unzip.inc(1);
-                progress.subdependencies.inc(1);
-                progress.integrity.inc(1);
+                progress.unzip.as_ref().inspect(|p| p.inc(1));
+                progress.subdependencies.as_ref().inspect(|p| p.inc(1));
+                progress.integrity.as_ref().inspect(|p| p.inc(1));
             }
             Ok(GitLockEntry::builder()
                 .name(&dep.name)
@@ -490,21 +497,21 @@ async fn install_subdependencies(path: impl AsRef<Path>) -> Result<()> {
         // clone submodules
         run_git_command(&["submodule", "update", "--init", "--recursive"], Some(&path)).await?;
     }
-    // if there is a soldeer.toml file, install the soldeer deps
-    let soldeer_config_path = path.join("soldeer.toml");
-    if fs::metadata(&soldeer_config_path).await.is_ok() {
-        // install subdependencies
-        run_forge_command(&["soldeer", "install"], Some(&path)).await?;
-        return Ok(());
-    }
-    // if soldeer deps are defined in the foundry.toml file, install them
-    let foundry_path = path.join("foundry.toml");
-    if let Ok(contents) = fs::read_to_string(&foundry_path).await {
-        if let Ok(doc) = contents.parse::<DocumentMut>() {
-            if doc.contains_table("dependencies") {
-                run_forge_command(&["soldeer", "install"], Some(&path)).await?;
-            }
-        }
+    // if there is a valid soldeer config, install the soldeer deps
+    if let Ok(paths) = Paths::try_from_root(&path) {
+        let config = read_soldeer_config(&paths.config)?;
+        ensure_dependencies_dir(&paths.dependencies)?;
+        let dependencies: Vec<Dependency> = read_config_deps(&paths.config)?;
+        let lockfile = read_lockfile(&paths.lock)?;
+        install_dependencies(
+            &dependencies,
+            &lockfile.entries,
+            &paths.dependencies,
+            config.recursive_deps,
+            #[cfg(feature = "cli")]
+            Progress::default(),
+        )
+        .await?;
     }
     Ok(())
 }
