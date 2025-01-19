@@ -115,13 +115,14 @@ impl InstallProgress {
         )
     }
 
-    /// Log a message related to progress to the caller
+    /// Log a message related to progress to the caller.
     pub fn log(&self, msg: impl fmt::Display) {
         if let Err(e) = self.logs.send(msg.to_string()) {
             warn!(err:err = e; "error sending log message to the install progress channel");
         }
     }
 
+    /// Advance all progress trackers at once, passing the dependency name.
     pub fn update_all(&self, dependency_name: DependencyName) {
         if let Err(e) = self.versions.send(dependency_name.clone()) {
             warn!(err:err = e; "error sending version message to the install progress channel");
