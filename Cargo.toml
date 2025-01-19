@@ -13,7 +13,7 @@ keywords = ["solidity", "package-manager", "foundry"]
 license = "MIT"
 readme = "./README.md"
 repository = "https://github.com/mario-eth/soldeer"
-rust-version = "1.80"
+rust-version = "1.83"
 version = "0.5.2"
 
 [workspace.lints.clippy]
@@ -23,15 +23,13 @@ uninlined-format-args = "warn"
 use-self = "warn"
 redundant-clone = "warn"
 unwrap_used = "warn"
+rustdoc = { all = "warn" }
 
 [workspace.lints.rust]
 rust-2018-idioms = "warn"
 unreachable-pub = "warn"
 unused-must-use = "warn"
 redundant-lifetimes = "warn"
-
-[workspace.lints.rustdoc]
-all = "warn"
 
 [workspace.dependencies]
 bon = "3.0.0"
