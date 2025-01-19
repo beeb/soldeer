@@ -6,15 +6,13 @@ use crate::{
     utils::{get_url_type, UrlType},
 };
 use derive_more::derive::{Display, From, FromStr};
+use log::warn;
 use serde::Deserialize;
 use std::{
     env, fmt, fs,
     path::{Path, PathBuf},
 };
 use toml_edit::{value, Array, DocumentMut, InlineTable, Item, Table};
-
-#[cfg(feature = "cli")]
-use cliclack::{log::warning, select};
 
 pub type Result<T> = std::result::Result<T, ConfigError>;
 
@@ -52,10 +50,8 @@ pub struct Paths {
     /// The path to the config file.
     ///
     /// `foundry.toml` if it contains a `[dependencies]` table, otherwise `soldeer.toml` if it
-    /// exists. If neither file exists, the user is prompted to create one when the `cli`
-    /// feature is enabled. If the `cli` feature is not enabled, the function will return the
-    /// path to the `foundry.toml` by default. When the config file does not exist, a new one
-    /// is created with default contents.
+    /// exists. Otherwise, the `foundry.toml` file is used by default. When the config file does
+    /// not exist, a new one is created with default contents.
     pub config: PathBuf,
 
     /// The path to the dependencies folder (does not need to exist).
@@ -91,6 +87,10 @@ impl Paths {
     /// The root path defaults to the current directory but can be overridden with the
     /// `SOLDEER_PROJECT_ROOT` environment variable.
     ///
+    /// If a config location is provided, it bypasses auto-detection and uses that. If `None`, then
+    /// the location is auto-detected or if impossible, the `foundry.toml` file is used. If the
+    /// config file does not exist yet, it gets created with default content.
+    ///
     /// The paths are canonicalized.
     pub fn with_config(config_location: Option<ConfigLocation>) -> Result<Self> {
         let root = dunce::canonicalize(Self::get_root_path())?;
@@ -121,7 +121,7 @@ impl Paths {
     ///
     /// At the moment, this is the current directory, unless overridden by the
     /// `SOLDEER_PROJECT_ROOT` environment variable.
-    fn get_root_path() -> PathBuf {
+    pub fn get_root_path() -> PathBuf {
         // TODO: find the project's root directory and use that as the root instead of the current
         // dir
         env::var("SOLDEER_PROJECT_ROOT")
@@ -135,8 +135,12 @@ impl Paths {
             .unwrap_or(env::current_dir().expect("could not get current dir"))
     }
 
-    /// Get the path to the config file or prompt the user to choose one (only with `cli` feature
-    /// flag).
+    /// Get the path to the config file.
+    ///
+    /// If a parameter is given for `config_location`, it will be used. Otherwise, the function will
+    /// try to auto-detect the location based on the existence of the `dependencies` entry in
+    /// the foundry config file, or the existence of a `soldeer.toml` file. If no config can be
+    /// found, `foundry.toml` is used by default.
     fn get_config_path(
         root: impl AsRef<Path>,
         config_location: Option<ConfigLocation>,
@@ -144,44 +148,21 @@ impl Paths {
         let foundry_path = root.as_ref().join("foundry.toml");
         let soldeer_path = root.as_ref().join("soldeer.toml");
         // use the user preference if available
-        if let Some(location) = config_location {
-            return create_or_modify_config(location, &foundry_path, &soldeer_path);
-        }
-
-        // auto-detect, or prompt the user if we can't determine the config path and the cli feature
-        // is enabled. Otherwise, we use `foundry.toml` by default.
-        if let Ok(contents) = fs::read_to_string(&foundry_path) {
-            let doc: DocumentMut = contents.parse::<DocumentMut>()?;
-            if doc.contains_table("dependencies") {
-                return Ok(foundry_path);
-            }
-        } else if soldeer_path.exists() {
-            return Ok(soldeer_path);
-        }
-
-        #[cfg(feature = "cli")]
-        warning("No soldeer config found")?;
-        #[cfg(feature = "cli")]
-        let config_option: ConfigLocation = select("Select how you want to configure Soldeer")
-            .initial_value("foundry")
-            .item("foundry", "Using foundry.toml", "recommended")
-            .item("soldeer", "Using soldeer.toml", "for non-foundry projects")
-            .interact()?
-            .parse()
-            .map_err(|_| ConfigError::InvalidPromptOption)?;
-
-        #[cfg(not(feature = "cli"))]
-        let config_option = ConfigLocation::Foundry;
-
-        create_or_modify_config(config_option, &foundry_path, &soldeer_path)
+        let location = config_location.or_else(|| detect_config_location(root)).unwrap_or_else(|| {
+            warn!("config file location could not be determined automatically, using foundry by default.");
+            ConfigLocation::Foundry
+        });
+        create_or_modify_config(location, &foundry_path, &soldeer_path)
     }
 
+    /// Default Foundry config file path
     pub fn foundry_default() -> PathBuf {
         let root: PathBuf =
             dunce::canonicalize(Self::get_root_path()).expect("could not get the root");
         root.join("foundry.toml")
     }
 
+    /// Default Soldeer config file path
     pub fn soldeer_default() -> PathBuf {
         let root: PathBuf =
             dunce::canonicalize(Self::get_root_path()).expect("could not get the root");
@@ -657,6 +638,26 @@ impl From<ConfigLocation> for PathBuf {
     }
 }
 
+/// Detect the location of the config file in case no user preference is available.
+///
+/// The function will try to auto-detect the location based on the existence of the
+/// `dependencies` entry in the foundry config file, or the existence of a `soldeer.toml` file.
+/// If no config can be found, `None` is returned.
+pub fn detect_config_location(root: impl AsRef<Path>) -> Option<ConfigLocation> {
+    let foundry_path = root.as_ref().join("foundry.toml");
+    let soldeer_path = root.as_ref().join("soldeer.toml");
+    if let Ok(contents) = fs::read_to_string(&foundry_path) {
+        if let Ok(doc) = contents.parse::<DocumentMut>() {
+            if doc.contains_table("dependencies") {
+                return Some(ConfigLocation::Foundry);
+            }
+        }
+    } else if soldeer_path.exists() {
+        return Some(ConfigLocation::Soldeer);
+    }
+    None
+}
+
 /// Read the list of dependencies from the config file.
 ///
 /// Dependencies are stored in a TOML table under the `dependencies` key.
@@ -739,7 +740,7 @@ pub fn delete_from_config(dependency_name: &str, path: impl AsRef<Path>) -> Resu
 }
 
 /// Update the config file to add the `dependencies` folder as a source for libraries and the
-/// `[dependencies]` table.
+/// `[dependencies]` table if necessary.
 pub fn update_config_libs(foundry_config: impl AsRef<Path>) -> Result<()> {
     let contents = fs::read_to_string(&foundry_config)?;
     let mut doc: DocumentMut = contents.parse::<DocumentMut>()?;
@@ -901,7 +902,7 @@ fn parse_dependency(name: impl Into<String>, value: &Item) -> Result<Dependency>
 }
 
 /// Create a basic config file with default contents if it doesn't exist, otherwise add
-/// `[dependencies]`.
+/// `[dependencies]` if necessary.
 fn create_or_modify_config(
     location: ConfigLocation,
     foundry_path: impl AsRef<Path>,

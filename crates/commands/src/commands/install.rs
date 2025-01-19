@@ -19,7 +19,8 @@ use std::fs;
 
 /// Install a dependency
 #[derive(Debug, Clone, Default, Parser, bon::Builder)]
-#[builder(on(String, into))]
+#[allow(clippy::duplicated_attributes)]
+#[builder(on(String, into), on(ConfigLocation, into))]
 #[clap(
     long_about = "Install a dependency
 

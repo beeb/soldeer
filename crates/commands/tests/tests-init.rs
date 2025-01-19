@@ -1,5 +1,10 @@
-use soldeer_commands::{commands::init::Init, run, Command, ConfigLocation};
-use soldeer_core::{config::read_config_deps, lock::read_lockfile, utils::run_git_command};
+use soldeer_commands::{commands::init::Init, run, Command};
+use soldeer_core::{
+    config::{read_config_deps, ConfigLocation},
+    lock::read_lockfile,
+    registry::get_latest_version,
+    utils::run_git_command,
+};
 use std::fs;
 use temp_env::async_with_vars;
 use testdir::testdir;
@@ -120,19 +125,23 @@ async fn test_init_select_foundry_location() {
             .await;
     assert!(res.is_ok(), "{res:?}");
 
+    let forge_std = get_latest_version("forge-std").await.unwrap();
     let config_path = dir.join("foundry.toml");
     assert!(config_path.exists());
 
-    let contents = r#"[profile.default]
+    let contents = format!(
+        r#"[profile.default]
 src = "src"
 out = "out"
 libs = ["dependencies"]
 
 [dependencies]
-forge-std = "1.9.4"
+forge-std = "{}"
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
-"#;
+"#,
+        forge_std.version_req()
+    );
     assert_eq!(fs::read_to_string(config_path).unwrap(), contents);
 }
 
@@ -147,11 +156,15 @@ async fn test_init_select_soldeer_location() {
             .await;
     assert!(res.is_ok(), "{res:?}");
 
+    let forge_std = get_latest_version("forge-std").await.unwrap();
     let config_path = dir.join("soldeer.toml");
     assert!(config_path.exists());
 
-    let contents = r#"[dependencies]
-forge-std = "1.9.4"
-"#;
+    let contents = format!(
+        r#"[dependencies]
+forge-std = "{}"
+"#,
+        forge_std.version_req()
+    );
     assert_eq!(fs::read_to_string(config_path).unwrap(), contents);
 }

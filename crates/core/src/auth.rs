@@ -1,15 +1,10 @@
 //! Registry authentication
 use crate::{errors::AuthError, registry::api_url, utils::login_file_path};
+use log::info;
+use path_slash::PathBufExt as _;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::fs;
-
-#[cfg(feature = "cli")]
-use cliclack::log::{info, success};
-#[cfg(feature = "cli")]
-use path_slash::PathBufExt as _;
-#[cfg(feature = "cli")]
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 pub type Result<T> = std::result::Result<T, AuthError>;
 
@@ -40,26 +35,20 @@ pub fn get_token() -> Result<String> {
 }
 
 /// Execute the login request and store the JWT token in the login file
-pub async fn execute_login(login: &Credentials) -> std::result::Result<(), AuthError> {
+pub async fn execute_login(login: &Credentials) -> std::result::Result<PathBuf, AuthError> {
     let security_file = login_file_path()?;
     let url = api_url("auth/login", &[]);
     let client = Client::new();
     let res = client.post(url).json(login).send().await?;
     match res.status() {
         s if s.is_success() => {
-            #[cfg(feature = "cli")]
-            success("Login successful")?;
-
             let response: LoginResponse = res.json().await?;
             fs::write(&security_file, response.token)?;
-
-            #[cfg(feature = "cli")]
-            info(format!(
-                "Login details saved in: {}",
-                PathBuf::from_slash_lossy(&security_file).to_string_lossy() /* normalize separators */
-            ))?;
-
-            Ok(())
+            info!(
+                token_path:% = PathBuf::from_slash_lossy(&security_file).to_string_lossy();
+                "login successful",
+            );
+            Ok(security_file)
         }
         StatusCode::UNAUTHORIZED => Err(AuthError::InvalidCredentials),
         _ => Err(AuthError::HttpError(

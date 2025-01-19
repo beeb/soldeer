@@ -63,9 +63,6 @@ pub enum ConfigError {
     #[error("invalid user input: {source}")]
     PromptError { source: io::Error },
 
-    #[error("invalid prompt option")]
-    InvalidPromptOption,
-
     #[error("error writing to config file: {0}")]
     FileWriteError(#[from] io::Error),
 

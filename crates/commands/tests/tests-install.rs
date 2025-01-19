@@ -1,5 +1,10 @@
-use soldeer_commands::{commands::install::Install, run, Command, ConfigLocation};
-use soldeer_core::{config::read_config_deps, download::download_file, lock::read_lockfile};
+use soldeer_commands::{commands::install::Install, run, Command};
+use soldeer_core::{
+    config::{read_config_deps, ConfigLocation},
+    download::download_file,
+    lock::read_lockfile,
+    registry::get_latest_version,
+};
 use std::{
     fs::{self},
     path::Path,
@@ -186,14 +191,18 @@ async fn test_install_foundry_config() {
 #[tokio::test]
 async fn test_install_foundry_remappings() {
     let dir = testdir!();
-    let contents = r#"[profile.default]
+    let dep = get_latest_version("@openzeppelin-contracts").await.unwrap();
+    let (major, _) = dep.version_req().split_once('.').unwrap();
+    let contents = format!(
+        r#"[profile.default]
 
 [soldeer]
 remappings_location = "config"
 
 [dependencies]
-"@openzeppelin-contracts" = "5"
-"#;
+"@openzeppelin-contracts" = "{major}"
+"#
+    );
     fs::write(dir.join("foundry.toml"), contents).unwrap();
     let cmd: Command = Install::builder().build().into();
     let res =
@@ -202,8 +211,8 @@ remappings_location = "config"
     assert!(res.is_ok(), "{res:?}");
     let config = fs::read_to_string(dir.join("foundry.toml")).unwrap();
     assert!(config.contains(
-        "remappings = [\"@openzeppelin-contracts-5/=dependencies/@openzeppelin-contracts-5.1.0/\"]"
-    ));
+        &format!("remappings = [\"@openzeppelin-contracts-{major}/=dependencies/@openzeppelin-contracts-{}/\"]", dep.version_req())
+    ), "{config}");
 }
 
 #[tokio::test]
@@ -402,6 +411,7 @@ async fn test_modifying_remappings_prefix_config() {
     let dir = testdir!();
 
     let contents = r#"[profile.default]
+libs = ["dependencies"]
 remappings = ["@custom-f@forge-std-1.8.1/=dependencies/forge-std-1.8.1/"]
 
 [soldeer]
@@ -422,6 +432,7 @@ remappings_location = "config"
     assert!(res.is_ok(), "{res:?}");
 
     let expected = r#"[profile.default]
+libs = ["dependencies"]
 remappings = ["!custom-f!forge-std-1.8.1/=dependencies/forge-std-1.8.1/"]
 
 [soldeer]

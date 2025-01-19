@@ -17,7 +17,8 @@ use std::fs;
 
 /// Convert a Foundry project to use Soldeer
 #[derive(Debug, Clone, Default, Parser, bon::Builder)]
-#[builder(on(String, into))]
+#[allow(clippy::duplicated_attributes)]
+#[builder(on(String, into), on(ConfigLocation, into))]
 #[clap(after_help = "For more information, read the README.md")]
 #[non_exhaustive]
 pub struct Init {

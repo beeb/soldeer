@@ -610,21 +610,6 @@ lib2 = "2.0.0"
     }
 
     #[test]
-    fn test_remappings_foundry_noprofile() {
-        let dir = testdir!();
-        let contents = r#"[dependencies]
-lib1 = "1.0.0"
-"#;
-        fs::write(dir.join("foundry.toml"), contents).unwrap();
-        let paths = Paths::from_root(&dir).unwrap();
-        let config = SoldeerConfig::default();
-        // no profile: no remappings are added
-        let res = remappings_foundry(&RemappingsAction::Update, &paths, &config);
-        assert!(res.is_ok(), "{res:?}");
-        assert_eq!(fs::read_to_string(&paths.config).unwrap(), contents);
-    }
-
-    #[test]
     fn test_remappings_foundry_default_profile_empty() {
         let dir = testdir!();
         let contents = r#"[profile.default]
@@ -862,6 +847,7 @@ remappings = [
     "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.0.2/",
     "foo/=bar/",
 ]
+libs = ["dependencies"]
 
 [dependencies]
 "@openzeppelin-contracts" = "5.0.2"

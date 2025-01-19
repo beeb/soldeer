@@ -1892,6 +1892,7 @@ dependencies = [
  "dunce",
  "home",
  "ignore",
+ "log",
  "mockito",
  "path-slash",
  "rayon",
