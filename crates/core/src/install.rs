@@ -279,7 +279,6 @@ pub async fn install_dependencies(
                     deps,
                     None,
                     recursive_deps,
-                    #[cfg(feature = "cli")]
                     p,
                 )
                 .await
@@ -363,7 +362,6 @@ pub async fn install_dependency(
             &lock.clone().into(),
             lock.install_path(&deps),
             recursive_deps,
-            #[cfg(feature = "cli")]
             progress,
         )
         .await
@@ -408,7 +406,6 @@ pub async fn install_dependency(
             &info,
             format_install_path(dependency.name(), &version, &deps),
             recursive_deps,
-            #[cfg(feature = "cli")]
             progress,
         )
         .await
