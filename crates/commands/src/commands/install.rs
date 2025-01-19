@@ -1,16 +1,16 @@
 use super::validate_dependency;
-use crate::ConfigLocation;
+use crate::{utils::Progress, ConfigLocation};
 use clap::Parser;
 use cliclack::{
     log::{remark, success, warning},
-    multi_progress, outro,
+    outro,
 };
 use soldeer_core::{
     config::{
         add_to_config, read_config_deps, read_soldeer_config, Dependency, GitIdentifier, Paths,
     },
     errors::{InstallError, LockError},
-    install::{ensure_dependencies_dir, install_dependencies, install_dependency, Progress},
+    install::{ensure_dependencies_dir, install_dependencies, install_dependency, InstallProgress},
     lock::{add_to_lockfile, generate_lockfile_contents, read_lockfile},
     remappings::{edit_remappings, RemappingsAction},
     Result,
@@ -111,19 +111,19 @@ pub(crate) async fn install_command(paths: &Paths, cmd: Install) -> Result<()> {
                 })?;
                 ensure_dependencies_dir(&paths.dependencies)?;
             }
-            let multi = multi_progress("Installing dependencies");
-            let progress = Progress::new(&multi, dependencies.len() as u64);
-            progress.start_all();
+
+            let (progress, monitor) = InstallProgress::new();
+            let bars = Progress::new("Installing dependencies", dependencies.len(), monitor);
+            bars.start_all();
             let new_locks = install_dependencies(
                 &dependencies,
                 &lockfile.entries,
                 &paths.dependencies,
                 config.recursive_deps,
-                progress.clone(),
+                progress,
             )
             .await?;
-            progress.stop_all();
-            multi.stop();
+            bars.stop_all();
             let new_lockfile_content = generate_lockfile_contents(new_locks);
             if !lockfile.raw.is_empty() && new_lockfile_content != lockfile.raw {
                 warning("Warning: the lock file is out of sync with the dependencies. Consider running `soldeer update` to re-generate the lockfile.")?;
@@ -149,20 +149,19 @@ pub(crate) async fn install_command(paths: &Paths, cmd: Install) -> Result<()> {
                 outro(format!("{dep} is already installed"))?;
                 return Ok(());
             }
-            let multi = multi_progress(format!("Installing {dep}"));
-            let progress = Progress::new(&multi, 1);
-            progress.start_all();
+            let (progress, monitor) = InstallProgress::new();
+            let bars = Progress::new(format!("Installing {dep}"), 1, monitor);
+            bars.start_all();
             let lock = install_dependency(
                 &dep,
                 None,
                 &paths.dependencies,
                 None,
                 config.recursive_deps,
-                progress.clone(),
+                progress,
             )
             .await?;
-            progress.stop_all();
-            multi.stop();
+            bars.stop_all();
             // for git deps, we need to add the commit hash before adding them to the
             // config, unless a branch/tag was specified
             if let Some(git_dep) = dep.as_git_mut() {

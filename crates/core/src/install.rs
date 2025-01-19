@@ -10,20 +10,136 @@ use crate::{
     registry::{get_dependency_url_remote, get_latest_supported_version},
     utils::{canonicalize, hash_file, hash_folder, run_forge_command, run_git_command},
 };
+use derive_more::derive::Display;
+use log::warn;
 use path_slash::PathBufExt as _;
-use std::path::{Path, PathBuf};
+use std::{
+    fmt,
+    ops::Deref,
+    path::{Path, PathBuf},
+    sync::mpsc,
+};
 use tokio::{fs, task::JoinSet};
 use toml_edit::DocumentMut;
 
-#[cfg(feature = "cli")]
-use cliclack::{progress_bar, MultiProgress, ProgressBar};
-#[cfg(feature = "cli")]
-use std::fmt;
-
-/// Template for the progress bars.
-pub const PROGRESS_TEMPLATE: &str = "[{elapsed_precise}] {bar:30.magenta} ({pos}/{len}) {msg}";
-
 pub type Result<T> = std::result::Result<T, InstallError>;
+
+#[derive(Debug, Clone, Display)]
+pub struct DependencyName(String);
+
+impl Deref for DependencyName {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: fmt::Display> From<&T> for DependencyName {
+    fn from(value: &T) -> Self {
+        Self(value.to_string())
+    }
+}
+
+/// Collection of channels to monitor the progress of the install process.
+#[derive(Debug)]
+pub struct InstallMonitoring {
+    /// Channel to receive install progress logs.
+    pub logs: mpsc::Receiver<String>,
+
+    /// Progress for calls to the API to retrieve the packages versions.
+    pub versions: mpsc::Receiver<DependencyName>,
+
+    /// Progress for downloading the dependencies.
+    pub downloads: mpsc::Receiver<DependencyName>,
+
+    /// Progress for unzipping the downloaded files.
+    pub unzip: mpsc::Receiver<DependencyName>,
+
+    /// Progress for installing subdependencies.
+    pub subdependencies: mpsc::Receiver<DependencyName>,
+
+    /// Progress for checking the integrity of the installed dependencies.
+    pub integrity: mpsc::Receiver<DependencyName>,
+}
+
+/// Collection of channels to notify the caller of the install progress.
+#[derive(Debug, Clone)]
+pub struct InstallProgress {
+    /// Channel to send messages to be logged to the user.
+    pub logs: mpsc::Sender<String>,
+
+    /// Progress for calls to the API to retrieve the packages versions.
+    pub versions: mpsc::Sender<DependencyName>,
+
+    /// Progress for downloading the dependencies.
+    pub downloads: mpsc::Sender<DependencyName>,
+
+    /// Progress for unzipping the downloaded files.
+    pub unzip: mpsc::Sender<DependencyName>,
+
+    /// Progress for installing subdependencies.
+    pub subdependencies: mpsc::Sender<DependencyName>,
+
+    /// Progress for checking the integrity of the installed dependencies.
+    pub integrity: mpsc::Sender<DependencyName>,
+}
+
+impl InstallProgress {
+    /// Create a new install progress tracker, with a receiving half ([InstallMonitoring]) and a
+    /// sending half ([InstallProgress]).
+    pub fn new() -> (Self, InstallMonitoring) {
+        let (logs_tx, logs_rx) = mpsc::channel();
+        let (versions_tx, versions_rx) = mpsc::channel();
+        let (downloads_tx, downloads_rx) = mpsc::channel();
+        let (unzip_tx, unzip_rx) = mpsc::channel();
+        let (subdependencies_tx, subdependencies_rx) = mpsc::channel();
+        let (integrity_tx, integrity_rx) = mpsc::channel();
+        (
+            Self {
+                logs: logs_tx,
+                versions: versions_tx,
+                downloads: downloads_tx,
+                unzip: unzip_tx,
+                subdependencies: subdependencies_tx,
+                integrity: integrity_tx,
+            },
+            InstallMonitoring {
+                logs: logs_rx,
+                versions: versions_rx,
+                downloads: downloads_rx,
+                unzip: unzip_rx,
+                subdependencies: subdependencies_rx,
+                integrity: integrity_rx,
+            },
+        )
+    }
+
+    /// Log a message related to progress to the caller
+    pub fn log(&self, msg: impl fmt::Display) {
+        if let Err(e) = self.logs.send(msg.to_string()) {
+            warn!(err:err = e; "error sending log message to the install progress channel");
+        }
+    }
+
+    pub fn update_all(&self, dependency_name: DependencyName) {
+        if let Err(e) = self.versions.send(dependency_name.clone()) {
+            warn!(err:err = e; "error sending version message to the install progress channel");
+        }
+        if let Err(e) = self.downloads.send(dependency_name.clone()) {
+            warn!(err:err = e; "error sending download message to the install progress channel");
+        }
+        if let Err(e) = self.unzip.send(dependency_name.clone()) {
+            warn!(err:err = e; "error sending unzip message to the install progress channel");
+        }
+        if let Err(e) = self.subdependencies.send(dependency_name.clone()) {
+            warn!(err:err = e; "error sending sudependencies message to the install progress channel");
+        }
+        if let Err(e) = self.integrity.send(dependency_name) {
+            warn!(err:err = e; "error sending integrity message to the install progress channel");
+        }
+    }
+}
 
 /// Status of a dependency, which can either be missing, installed and untouched, or installed but
 /// failing the integrity check.
@@ -38,76 +154,6 @@ pub enum DependencyStatus {
 
     /// The dependency is installed and the integrity check passed.
     Installed,
-}
-
-/// Progress bars for the installation process.
-#[cfg(feature = "cli")]
-#[derive(Clone)]
-pub struct Progress {
-    /// The multi progress bar object.
-    pub multi: MultiProgress,
-
-    /// Progress bar for calls to the API to retrieve the packages versions.
-    pub versions: ProgressBar,
-
-    /// Progress bar for downloading the dependencies.
-    pub downloads: ProgressBar,
-
-    /// Progress bar for unzipping the downloaded files.
-    pub unzip: ProgressBar,
-
-    /// Progress bar for installing subdependencies.
-    pub subdependencies: ProgressBar,
-
-    /// Progress bar for checking the integrity of the installed dependencies.
-    pub integrity: ProgressBar,
-}
-
-#[cfg(feature = "cli")]
-impl Progress {
-    /// Create a new progress bar object.
-    ///
-    /// The total number of dependencies to install must be passed as an argument.
-    pub fn new(multi: &MultiProgress, deps: u64) -> Self {
-        let versions = multi.add(progress_bar(deps).with_template(PROGRESS_TEMPLATE));
-        let downloads = multi.add(progress_bar(deps).with_template(PROGRESS_TEMPLATE));
-        let unzip = multi.add(progress_bar(deps).with_template(PROGRESS_TEMPLATE));
-        let subdependencies = multi.add(progress_bar(deps).with_template(PROGRESS_TEMPLATE));
-        let integrity = multi.add(progress_bar(deps).with_template(PROGRESS_TEMPLATE));
-        Self { multi: multi.clone(), versions, downloads, unzip, subdependencies, integrity }
-    }
-
-    /// Start all progress bars.
-    pub fn start_all(&self) {
-        self.versions.start("Retrieving versions...");
-        self.downloads.start("Downloading dependencies...");
-        self.unzip.start("Unzipping dependencies...");
-        self.subdependencies.start("Installing subdependencies...");
-        self.integrity.start("Checking integrity...");
-    }
-
-    /// Increment all progress bars by one.
-    pub fn increment_all(&self) {
-        self.versions.inc(1);
-        self.downloads.inc(1);
-        self.unzip.inc(1);
-        self.subdependencies.inc(1);
-        self.integrity.inc(1);
-    }
-
-    /// Stop all progress bars.
-    pub fn stop_all(&self) {
-        self.versions.stop("Done retrieving versions");
-        self.downloads.stop("Done downloading dependencies");
-        self.unzip.stop("Done unzipping dependencies");
-        self.subdependencies.stop("Done installing subdependencies");
-        self.integrity.stop("Done checking integrity");
-    }
-
-    /// Log a message above the multiprogress bar.
-    pub fn log(&self, msg: impl fmt::Display) {
-        self.multi.println(msg);
-    }
 }
 
 /// HTTP dependency installation information.
@@ -128,6 +174,13 @@ struct HttpInstallInfo {
     checksum: Option<String>,
 }
 
+impl fmt::Display for HttpInstallInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}-{}", self.name, self.version) // since the version is an exact version number,
+                                                    // we use a dash and not a tilde
+    }
+}
+
 /// Git dependency installation information.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, bon::Builder)]
 #[builder(on(String, into))]
@@ -146,11 +199,17 @@ struct GitInstallInfo {
     identifier: Option<GitIdentifier>,
 }
 
+impl fmt::Display for GitInstallInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}-{}", self.name, self.version)
+    }
+}
+
 /// Installation information for a dependency.
 ///
 /// A builder can be used to create the underlying [`HttpInstallInfo`] or [`GitInstallInfo`] and
 /// then converted into this type with `.into()`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
 enum InstallInfo {
     /// Installation information for an HTTP dependency.
     Http(HttpInstallInfo),
@@ -203,13 +262,12 @@ pub async fn install_dependencies(
     locks: &[LockEntry],
     deps: impl AsRef<Path>,
     recursive_deps: bool,
-    #[cfg(feature = "cli")] progress: Progress,
+    progress: InstallProgress,
 ) -> Result<Vec<LockEntry>> {
     let mut set = JoinSet::new();
     for dep in dependencies {
         set.spawn({
             let d = dep.clone();
-            #[cfg(feature = "cli")]
             let p = progress.clone();
             let lock = locks.iter().find(|l| l.name() == dep.name()).cloned();
             let deps = deps.as_ref().to_path_buf();
@@ -249,15 +307,14 @@ pub async fn install_dependency(
     deps: impl AsRef<Path>,
     force_version: Option<String>,
     recursive_deps: bool,
-    #[cfg(feature = "cli")] progress: Progress,
+    progress: InstallProgress,
 ) -> Result<LockEntry> {
     if let Some(lock) = lock {
         match check_dependency_integrity(lock, &deps).await? {
             DependencyStatus::Installed => {
                 // no action needed, dependency is already installed and matches the lockfile
                 // entry
-                #[cfg(feature = "cli")]
-                progress.increment_all();
+                progress.update_all(dependency.into());
 
                 return Ok(lock.clone());
             }
@@ -265,18 +322,15 @@ pub async fn install_dependency(
                 Dependency::Http(_) => {
                     // we know the folder exists because otherwise we would have gotten
                     // `Missing`
-                    #[cfg(feature = "cli")]
                     progress.log(format!(
                         "Dependency {dependency} failed integrity check, reinstalling"
                     ));
 
                     delete_dependency_files(dependency, &deps).await?;
                     // we won't need to retrieve the version number so we mark it as done
-                    #[cfg(feature = "cli")]
-                    progress.versions.inc(1);
+                    progress.versions.send(dependency.into()).ok();
                 }
                 Dependency::Git(_) => {
-                    #[cfg(feature = "cli")]
                     progress.log(format!(
                         "Dependency {dependency} failed integrity check, resetting to commit {}",
                         lock.as_git().expect("lock entry should be of type git").rev
@@ -288,8 +342,7 @@ pub async fn install_dependency(
                     )
                     .await?;
                     // dependency should now be at the correct commit, we can exit
-                    #[cfg(feature = "cli")]
-                    progress.increment_all();
+                    progress.update_all(dependency.into());
 
                     return Ok(lock.clone());
                 }
@@ -302,8 +355,7 @@ pub async fn install_dependency(
                         .map_err(|e| InstallError::IOError { path, source: e })?;
                 }
                 // we won't need to retrieve the version number so we mark it as done
-                #[cfg(feature = "cli")]
-                progress.versions.inc(1);
+                progress.versions.send(dependency.into()).ok();
             }
         }
         install_dependency_inner(
@@ -337,8 +389,7 @@ pub async fn install_dependency(
             }
         };
         // indicate that we have retrieved the version number
-        #[cfg(feature = "cli")]
-        progress.versions.inc(1);
+        progress.versions.send(dependency.into()).ok();
 
         let info = match &dependency {
             Dependency::Http(dep) => {
@@ -394,7 +445,7 @@ async fn install_dependency_inner(
     dep: &InstallInfo,
     path: impl AsRef<Path>,
     subdependencies: bool,
-    #[cfg(feature = "cli")] progress: Progress,
+    progress: InstallProgress,
 ) -> Result<LockEntry> {
     match dep {
         InstallInfo::Http(dep) => {
@@ -406,8 +457,7 @@ async fn install_dependency_inner(
                 &format!("{}-{}", dep.name, dep.version),
             )
             .await?;
-            #[cfg(feature = "cli")]
-            progress.downloads.inc(1);
+            progress.downloads.send(dep.into()).ok();
 
             let zip_integrity = tokio::task::spawn_blocking({
                 let zip_path = zip_path.clone();
@@ -425,19 +475,16 @@ async fn install_dependency_inner(
                 }
             }
             unzip_file(&zip_path, path).await?;
-            #[cfg(feature = "cli")]
-            progress.unzip.inc(1);
+            progress.unzip.send(dep.into()).ok();
 
             if subdependencies {
                 install_subdependencies(path).await?;
             }
-            #[cfg(feature = "cli")]
-            progress.subdependencies.inc(1);
+            progress.subdependencies.send(dep.into()).ok();
 
             let integrity = hash_folder(path)
                 .map_err(|e| InstallError::IOError { path: path.to_path_buf(), source: e })?;
-            #[cfg(feature = "cli")]
-            progress.integrity.inc(1);
+            progress.integrity.send(dep.into()).ok();
 
             Ok(HttpLockEntry::builder()
                 .name(&dep.name)
@@ -452,18 +499,14 @@ async fn install_dependency_inner(
             // if the dependency was specified without a commit hash and we didn't have a lockfile,
             // clone the default branch
             let commit = clone_repo(&dep.git, dep.identifier.as_ref(), &path).await?;
-            #[cfg(feature = "cli")]
-            progress.downloads.inc(1);
+            progress.downloads.send(dep.into()).ok();
 
             if subdependencies {
                 install_subdependencies(&path).await?;
             }
-            #[cfg(feature = "cli")]
-            {
-                progress.unzip.inc(1);
-                progress.subdependencies.inc(1);
-                progress.integrity.inc(1);
-            }
+            progress.unzip.send(dep.into()).ok();
+            progress.subdependencies.send(dep.into()).ok();
+            progress.integrity.send(dep.into()).ok();
             Ok(GitLockEntry::builder()
                 .name(&dep.name)
                 .version(&dep.version)
@@ -594,7 +637,6 @@ async fn reset_git_dependency(lock: &GitLockEntry, deps: impl AsRef<Path>) -> Re
 mod tests {
     use super::*;
     use crate::config::{GitDependency, HttpDependency};
-    use cliclack::multi_progress;
     use mockito::{Matcher, Server, ServerGuard};
     use temp_env::async_with_vars;
     use testdir::testdir;
@@ -736,8 +778,8 @@ mod tests {
     async fn test_install_dependency_inner_http() {
         let dir = testdir!();
         let install: InstallInfo = HttpInstallInfo::builder().name("test").version("1.0.0").url("https://github.com/mario-eth/soldeer/archive/8585a7ec85a29889cec8d08f4770e15ec4795943.zip").checksum("94a73dbe106f48179ea39b00d42e5d4dd96fdc6252caa3a89ce7efdaec0b9468").build().into();
-        let multi = multi_progress("Installing dependencies");
-        let res = install_dependency_inner(&install, &dir, false, Progress::new(&multi, 1)).await;
+        let (progress, _) = InstallProgress::new();
+        let res = install_dependency_inner(&install, &dir, false, progress).await;
         assert!(res.is_ok(), "{res:?}");
         let lock = res.unwrap();
         assert_eq!(lock.name(), "test");
@@ -761,8 +803,8 @@ mod tests {
             .git("https://github.com/beeb/test-repo.git")
             .build()
             .into();
-        let multi = multi_progress("Installing dependencies");
-        let res = install_dependency_inner(&install, &dir, false, Progress::new(&multi, 1)).await;
+        let (progress, _) = InstallProgress::new();
+        let res = install_dependency_inner(&install, &dir, false, progress).await;
         assert!(res.is_ok(), "{res:?}");
         let lock = res.unwrap();
         assert_eq!(lock.name(), "test");
@@ -783,8 +825,8 @@ mod tests {
             .identifier(GitIdentifier::from_rev("78c2f6a1a54db26bab6c3f501854a1564eb3707f"))
             .build()
             .into();
-        let multi = multi_progress("Installing dependencies");
-        let res = install_dependency_inner(&install, &dir, false, Progress::new(&multi, 1)).await;
+        let (progress, _) = InstallProgress::new();
+        let res = install_dependency_inner(&install, &dir, false, progress).await;
         assert!(res.is_ok(), "{res:?}");
         let lock = res.unwrap();
         assert_eq!(lock.name(), "test");
@@ -805,8 +847,8 @@ mod tests {
             .identifier(GitIdentifier::from_branch("dev"))
             .build()
             .into();
-        let multi = multi_progress("Installing dependencies");
-        let res = install_dependency_inner(&install, &dir, false, Progress::new(&multi, 1)).await;
+        let (progress, _) = InstallProgress::new();
+        let res = install_dependency_inner(&install, &dir, false, progress).await;
         assert!(res.is_ok(), "{res:?}");
         let lock = res.unwrap();
         assert_eq!(lock.name(), "test");
@@ -827,8 +869,8 @@ mod tests {
             .identifier(GitIdentifier::from_tag("v0.1.0"))
             .build()
             .into();
-        let multi = multi_progress("Installing dependencies");
-        let res = install_dependency_inner(&install, &dir, false, Progress::new(&multi, 1)).await;
+        let (progress, _) = InstallProgress::new();
+        let res = install_dependency_inner(&install, &dir, false, progress).await;
         assert!(res.is_ok(), "{res:?}");
         let lock = res.unwrap();
         assert_eq!(lock.name(), "test");
@@ -844,10 +886,10 @@ mod tests {
         let server = mock_api_server().await;
         let dir = testdir!();
         let dep = HttpDependency::builder().name("forge-std").version_req("1.9.2").build().into();
-        let multi = multi_progress("Installing dependencies");
+        let (progress, _) = InstallProgress::new();
         let res = async_with_vars(
             [("SOLDEER_API_URL", Some(server.url()))],
-            install_dependency(&dep, None, &dir, None, false, Progress::new(&multi, 1)),
+            install_dependency(&dep, None, &dir, None, false, progress),
         )
         .await;
         assert!(res.is_ok(), "{res:?}");
@@ -869,10 +911,10 @@ mod tests {
         let server = mock_api_server().await;
         let dir = testdir!();
         let dep = HttpDependency::builder().name("forge-std").version_req("^1.9.0").build().into();
-        let multi = multi_progress("Installing dependencies");
+        let (progress, _) = InstallProgress::new();
         let res = async_with_vars(
             [("SOLDEER_API_URL", Some(server.url()))],
-            install_dependency(&dep, None, &dir, None, false, Progress::new(&multi, 1)),
+            install_dependency(&dep, None, &dir, None, false, progress),
         )
         .await;
         assert!(res.is_ok(), "{res:?}");
@@ -889,8 +931,8 @@ mod tests {
     async fn test_install_dependency_http() {
         let dir = testdir!();
         let dep = HttpDependency::builder().name("test").version_req("1.0.0").url("https://github.com/mario-eth/soldeer/archive/8585a7ec85a29889cec8d08f4770e15ec4795943.zip").build().into();
-        let multi = multi_progress("Installing dependencies");
-        let res = install_dependency(&dep, None, &dir, None, false, Progress::new(&multi, 1)).await;
+        let (progress, _) = InstallProgress::new();
+        let res = install_dependency(&dep, None, &dir, None, false, progress).await;
         assert!(res.is_ok(), "{res:?}");
         let lock = res.unwrap();
         assert_eq!(lock.name(), dep.name());
@@ -914,8 +956,8 @@ mod tests {
             .git("https://github.com/beeb/test-repo.git")
             .build()
             .into();
-        let multi = multi_progress("Installing dependencies");
-        let res = install_dependency(&dep, None, &dir, None, false, Progress::new(&multi, 1)).await;
+        let (progress, _) = InstallProgress::new();
+        let res = install_dependency(&dep, None, &dir, None, false, progress).await;
         assert!(res.is_ok(), "{res:?}");
         let lock = res.unwrap();
         assert_eq!(lock.name(), dep.name());

@@ -1,12 +1,9 @@
-use crate::ConfigLocation;
+use crate::{utils::Progress, ConfigLocation};
 use clap::Parser;
-use cliclack::{
-    log::{remark, success},
-    multi_progress,
-};
+use cliclack::log::{remark, success};
 use soldeer_core::{
     config::{add_to_config, read_soldeer_config, update_config_libs, Paths},
-    install::{ensure_dependencies_dir, install_dependency, Progress},
+    install::{ensure_dependencies_dir, install_dependency, InstallProgress},
     lock::add_to_lockfile,
     registry::get_latest_version,
     remappings::{edit_remappings, RemappingsAction},
@@ -44,17 +41,15 @@ pub(crate) async fn init_command(paths: &Paths, cmd: Init) -> Result<()> {
     success("Done reading config")?;
     ensure_dependencies_dir(&paths.dependencies)?;
     let dependency = get_latest_version("forge-std").await?;
-    let multi = multi_progress(format!("Installing {dependency}"));
-    let progress = Progress::new(&multi, 1);
-    progress.start_all();
-    let lock =
-        install_dependency(&dependency, None, &paths.dependencies, None, false, progress.clone())
-            .await
-            .inspect_err(|e| {
-                multi.error(e);
-            })?;
-    progress.stop_all();
-    multi.stop();
+    let (progress, monitor) = InstallProgress::new();
+    let bars = Progress::new(format!("Installing {dependency}"), 1, monitor);
+    bars.start_all();
+    let lock = install_dependency(&dependency, None, &paths.dependencies, None, false, progress)
+        .await
+        .inspect_err(|e| {
+            bars.set_error(e);
+        })?;
+    bars.stop_all();
     add_to_config(&dependency, &paths.config)?;
     let foundry_config = paths.root.join("foundry.toml");
     if foundry_config.exists() {

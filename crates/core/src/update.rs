@@ -1,10 +1,8 @@
 //! Update dependencies to the latest version.
-#[cfg(feature = "cli")]
-use crate::install::Progress;
 use crate::{
     config::{Dependency, GitIdentifier},
     errors::UpdateError,
-    install::install_dependency,
+    install::{install_dependency, InstallProgress},
     lock::{format_install_path, GitLockEntry, LockEntry},
     registry::get_latest_supported_version,
     utils::run_git_command,
@@ -34,7 +32,7 @@ pub async fn update_dependencies(
     locks: &[LockEntry],
     deps_path: impl AsRef<Path>,
     recursive_deps: bool,
-    #[cfg(feature = "cli")] progress: Progress,
+    progress: InstallProgress,
 ) -> Result<Vec<LockEntry>> {
     let mut set = JoinSet::new();
     for dep in dependencies {
@@ -84,7 +82,7 @@ pub async fn update_dependency(
     lock: Option<&LockEntry>,
     deps: impl AsRef<Path>,
     recursive_deps: bool,
-    #[cfg(feature = "cli")] progress: Progress,
+    progress: InstallProgress,
 ) -> Result<LockEntry> {
     match dependency {
         Dependency::Git(ref dep)
@@ -138,8 +136,7 @@ pub async fn update_dependency(
                 .rev(commit)
                 .build()
                 .into();
-            #[cfg(feature = "cli")]
-            progress.increment_all();
+            progress.update_all(dependency.into());
 
             Ok(new_lock)
         }
