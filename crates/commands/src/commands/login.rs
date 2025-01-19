@@ -1,9 +1,12 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 use cliclack::{
     input,
-    log::{remark, step},
+    log::{info, remark, step, success},
 };
 use email_address_parser::{EmailAddress, ParsingOptions};
+use path_slash::PathBufExt as _;
 use soldeer_core::{
     auth::{execute_login, Credentials},
     errors::AuthError,
@@ -58,6 +61,11 @@ pub(crate) async fn login_command(cmd: Login) -> Result<()> {
         None => cliclack::password("Password").mask('▪').interact()?,
     };
 
-    execute_login(&Credentials { email, password }).await?;
+    let token_path = execute_login(&Credentials { email, password }).await?;
+    success("Login successful")?;
+    info(format!(
+        "Login details saved in: {}",
+        PathBuf::from_slash_lossy(&token_path).to_string_lossy() /* normalize separators */
+    ))?;
     Ok(())
 }

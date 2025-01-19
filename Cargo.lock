@@ -1872,6 +1872,7 @@ dependencies = [
  "derive_more",
  "email-address-parser",
  "mockito",
+ "path-slash",
  "rayon",
  "reqwest",
  "soldeer-core",

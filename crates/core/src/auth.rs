@@ -87,6 +87,7 @@ mod tests {
         )
         .await;
         assert!(res.is_ok(), "{res:?}");
+        assert_eq!(fs::canonicalize(res.unwrap()).unwrap(), fs::canonicalize(&test_file).unwrap());
         assert_eq!(fs::read_to_string(test_file).unwrap(), "jwt_token_example");
     }
 
