@@ -1,5 +1,5 @@
 //! Utils for the commands crate
-use std::{fmt, thread};
+use std::fmt;
 
 use crate::ConfigLocation;
 use cliclack::{multi_progress, progress_bar, select, MultiProgress, ProgressBar};
@@ -35,53 +35,53 @@ impl Progress {
         let subdependencies =
             multi.add(progress_bar(total as u64).with_template(PROGRESS_TEMPLATE));
         let integrity = multi.add(progress_bar(total as u64).with_template(PROGRESS_TEMPLATE));
-        thread::spawn({
+        tokio::task::spawn({
             let multi = multi.clone();
-            move || {
+            async move {
                 while let Ok(log) = monitor.logs.recv() {
                     multi.println(log);
                 }
             }
         });
-        thread::spawn({
+        tokio::task::spawn({
             let versions = versions.clone();
-            move || {
+            async move {
                 while let Ok(dep) = monitor.versions.recv() {
                     versions.inc(1);
                     versions.set_message(format!("Got version for {dep}"));
                 }
             }
         });
-        thread::spawn({
+        tokio::task::spawn({
             let downloads = downloads.clone();
-            move || {
+            async move {
                 while let Ok(dep) = monitor.downloads.recv() {
                     downloads.inc(1);
                     downloads.set_message(format!("Downloaded {dep}"));
                 }
             }
         });
-        thread::spawn({
+        tokio::task::spawn({
             let unzip = unzip.clone();
-            move || {
+            async move {
                 while let Ok(dep) = monitor.unzip.recv() {
                     unzip.inc(1);
                     unzip.set_message(format!("Unzipped {dep}"));
                 }
             }
         });
-        thread::spawn({
+        tokio::task::spawn({
             let subdependencies = subdependencies.clone();
-            move || {
+            async move {
                 while let Ok(dep) = monitor.subdependencies.recv() {
                     subdependencies.inc(1);
                     subdependencies.set_message(format!("Installed subdeps for {dep}"));
                 }
             }
         });
-        thread::spawn({
+        tokio::task::spawn({
             let integrity = integrity.clone();
-            move || {
+            async move {
                 while let Ok(dep) = monitor.integrity.recv() {
                     integrity.inc(1);
                     integrity.set_message(format!("Checked integrity of {dep}"));
