@@ -24,7 +24,7 @@ derive_more.workspace = true
 email-address-parser = "2.0.0"
 path-slash.workspace = true
 rayon.workspace = true
-soldeer-core = { path = "../core", version = "0.5.2", features = ["cli"] }
+soldeer-core = { path = "../core", version = "0.5.2" }
 tokio.workspace = true
 
 [dev-dependencies]
@@ -36,3 +36,4 @@ testdir.workspace = true
 [features]
 default = ["rustls"]
 rustls = ["soldeer-core/rustls"]
+serde = ["soldeer-core/serde"]

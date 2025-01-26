@@ -1909,7 +1909,6 @@ version = "0.5.2"
 dependencies = [
  "bon",
  "chrono",
- "cliclack",
  "const-hex",
  "derive_more",
  "dunce",
