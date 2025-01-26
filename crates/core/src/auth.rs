@@ -1,7 +1,6 @@
 //! Registry authentication
 use crate::{errors::AuthError, registry::api_url, utils::login_file_path};
 use log::{debug, info};
-use path_slash::PathBufExt as _;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
