@@ -1,6 +1,6 @@
 //! Registry authentication
 use crate::{errors::AuthError, registry::api_url, utils::login_file_path};
-use log::info;
+use log::{debug, info};
 use path_slash::PathBufExt as _;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -25,30 +25,30 @@ pub struct LoginResponse {
 
 /// Get the JWT token from the login file
 pub fn get_token() -> Result<String> {
-    let login_file = login_file_path()?;
+    let token_path = login_file_path()?;
     let jwt =
-        fs::read_to_string(&login_file).map_err(|_| AuthError::MissingToken)?.trim().to_string();
+        fs::read_to_string(&token_path).map_err(|_| AuthError::MissingToken)?.trim().to_string();
     if jwt.is_empty() {
+        debug!(token_path:?; "token file exists but is empty");
         return Err(AuthError::MissingToken);
     }
+    debug!(token_path:?; "token retrieved from file");
     Ok(jwt)
 }
 
 /// Execute the login request and store the JWT token in the login file
 pub async fn execute_login(login: &Credentials) -> std::result::Result<PathBuf, AuthError> {
-    let security_file = login_file_path()?;
+    let token_path = login_file_path()?;
     let url = api_url("auth/login", &[]);
     let client = Client::new();
     let res = client.post(url).json(login).send().await?;
     match res.status() {
         s if s.is_success() => {
+            debug!("login request completed");
             let response: LoginResponse = res.json().await?;
-            fs::write(&security_file, response.token)?;
-            info!(
-                token_path:% = PathBuf::from_slash_lossy(&security_file).to_string_lossy();
-                "login successful",
-            );
-            Ok(security_file)
+            fs::write(&token_path, response.token)?;
+            info!(token_path:?; "login successful");
+            Ok(token_path)
         }
         StatusCode::UNAUTHORIZED => Err(AuthError::InvalidCredentials),
         _ => Err(AuthError::HttpError(
