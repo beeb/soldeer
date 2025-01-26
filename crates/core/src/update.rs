@@ -38,22 +38,11 @@ pub async fn update_dependencies(
     for dep in dependencies {
         set.spawn({
             let d = dep.clone();
-            #[cfg(feature = "cli")]
             let p = progress.clone();
 
             let lock = locks.iter().find(|l| l.name() == dep.name()).cloned();
             let paths = deps_path.as_ref().to_path_buf();
-            async move {
-                update_dependency(
-                    &d,
-                    lock.as_ref(),
-                    &paths,
-                    recursive_deps,
-                    #[cfg(feature = "cli")]
-                    p,
-                )
-                .await
-            }
+            async move { update_dependency(&d, lock.as_ref(), &paths, recursive_deps, p).await }
         });
     }
 
@@ -126,7 +115,6 @@ pub async fn update_dependency(
                 .trim()
                 .to_string();
             if commit != old_commit {
-                #[cfg(feature = "cli")]
                 progress.log(format!("Updating {dependency} from {old_commit:.7} to {commit:.7}"));
             }
             let new_lock = GitLockEntry::builder()
@@ -152,16 +140,9 @@ pub async fn update_dependency(
                     .build()
                     .into(),
             };
-            let new_lock = install_dependency(
-                dependency,
-                Some(lock),
-                &deps,
-                None,
-                recursive_deps,
-                #[cfg(feature = "cli")]
-                progress,
-            )
-            .await?;
+            let new_lock =
+                install_dependency(dependency, Some(lock), &deps, None, recursive_deps, progress)
+                    .await?;
             Ok(new_lock)
         }
         _ => {
@@ -174,7 +155,6 @@ pub async fn update_dependency(
                 (None, Some(lock)) => {
                     let new_version = get_latest_supported_version(dependency).await?;
                     if lock.version() != new_version {
-                        #[cfg(feature = "cli")]
                         progress.log(format!(
                             "Updating {} from {} to {new_version}",
                             dependency.name(),
@@ -191,7 +171,6 @@ pub async fn update_dependency(
                 &deps,
                 force_version,
                 recursive_deps,
-                #[cfg(feature = "cli")]
                 progress,
             )
             .await?;

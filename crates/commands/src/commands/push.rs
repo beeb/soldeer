@@ -1,6 +1,6 @@
 use super::validate_dependency;
 use clap::Parser;
-use cliclack::log::{info, remark, warning};
+use cliclack::log::{info, remark, success, warning};
 use soldeer_core::{
     errors::PublishError,
     push::{filter_ignored_files, push_version, validate_name},
@@ -80,6 +80,8 @@ pub(crate) async fn push_command(cmd: Push) -> Result<()> {
         push_version(dependency_name, dependency_version, path, &files_to_copy, cmd.dry_run).await?
     {
         info(format!("Zip file created at {}", zip_path.to_string_lossy()))?;
+    } else {
+        success("Pushed to repository!")?;
     }
     Ok(())
 }

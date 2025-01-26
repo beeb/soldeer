@@ -21,9 +21,6 @@ use std::{
 };
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
-#[cfg(feature = "cli")]
-use cliclack::log::success;
-
 pub type Result<T> = std::result::Result<T, PublishError>;
 
 /// Push a new version of a dependency to the registry.
@@ -228,12 +225,7 @@ async fn push_to_repo(
     );
     let response = client.post(url).headers(headers.clone()).multipart(form).send().await?;
     match response.status() {
-        StatusCode::OK => {
-            #[cfg(feature = "cli")]
-            success("Pushed to repository!").ok();
-
-            Ok(())
-        }
+        StatusCode::OK => Ok(()),
         StatusCode::NO_CONTENT => Err(PublishError::ProjectNotFound),
         StatusCode::ALREADY_REPORTED => Err(PublishError::AlreadyExists),
         StatusCode::UNAUTHORIZED => Err(PublishError::AuthError(AuthError::InvalidCredentials)),
