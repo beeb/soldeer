@@ -27,7 +27,7 @@ impl Progress {
     /// Create a new progress bar object.
     ///
     /// A title and the total number of dependencies to install must be passed as an argument.
-    pub fn new(title: impl fmt::Display, total: usize, monitor: InstallMonitoring) -> Self {
+    pub fn new(title: impl fmt::Display, total: usize, mut monitor: InstallMonitoring) -> Self {
         let multi = multi_progress(title);
         let versions = multi.add(progress_bar(total as u64).with_template(PROGRESS_TEMPLATE));
         let downloads = multi.add(progress_bar(total as u64).with_template(PROGRESS_TEMPLATE));
@@ -38,7 +38,7 @@ impl Progress {
         tokio::task::spawn({
             let multi = multi.clone();
             async move {
-                while let Ok(log) = monitor.logs.recv() {
+                while let Some(log) = monitor.logs.recv().await {
                     multi.println(log);
                 }
             }
@@ -46,7 +46,7 @@ impl Progress {
         tokio::task::spawn({
             let versions = versions.clone();
             async move {
-                while let Ok(dep) = monitor.versions.recv() {
+                while let Some(dep) = monitor.versions.recv().await {
                     versions.inc(1);
                     versions.set_message(format!("Got version for {dep}"));
                 }
@@ -55,7 +55,7 @@ impl Progress {
         tokio::task::spawn({
             let downloads = downloads.clone();
             async move {
-                while let Ok(dep) = monitor.downloads.recv() {
+                while let Some(dep) = monitor.downloads.recv().await {
                     downloads.inc(1);
                     downloads.set_message(format!("Downloaded {dep}"));
                 }
@@ -64,7 +64,7 @@ impl Progress {
         tokio::task::spawn({
             let unzip = unzip.clone();
             async move {
-                while let Ok(dep) = monitor.unzip.recv() {
+                while let Some(dep) = monitor.unzip.recv().await {
                     unzip.inc(1);
                     unzip.set_message(format!("Unzipped {dep}"));
                 }
@@ -73,7 +73,7 @@ impl Progress {
         tokio::task::spawn({
             let subdependencies = subdependencies.clone();
             async move {
-                while let Ok(dep) = monitor.subdependencies.recv() {
+                while let Some(dep) = monitor.subdependencies.recv().await {
                     subdependencies.inc(1);
                     subdependencies.set_message(format!("Installed subdeps for {dep}"));
                 }
@@ -82,7 +82,7 @@ impl Progress {
         tokio::task::spawn({
             let integrity = integrity.clone();
             async move {
-                while let Ok(dep) = monitor.integrity.recv() {
+                while let Some(dep) = monitor.integrity.recv().await {
                     integrity.inc(1);
                     integrity.set_message(format!("Checked integrity of {dep}"));
                 }

@@ -17,9 +17,8 @@ use std::{
     fmt,
     ops::Deref,
     path::{Path, PathBuf},
-    sync::mpsc,
 };
-use tokio::{fs, task::JoinSet};
+use tokio::{fs, sync::mpsc, task::JoinSet};
 use toml_edit::DocumentMut;
 
 pub type Result<T> = std::result::Result<T, InstallError>;
@@ -45,56 +44,56 @@ impl<T: fmt::Display> From<&T> for DependencyName {
 #[derive(Debug)]
 pub struct InstallMonitoring {
     /// Channel to receive install progress logs.
-    pub logs: mpsc::Receiver<String>,
+    pub logs: mpsc::UnboundedReceiver<String>,
 
     /// Progress for calls to the API to retrieve the packages versions.
-    pub versions: mpsc::Receiver<DependencyName>,
+    pub versions: mpsc::UnboundedReceiver<DependencyName>,
 
     /// Progress for downloading the dependencies.
-    pub downloads: mpsc::Receiver<DependencyName>,
+    pub downloads: mpsc::UnboundedReceiver<DependencyName>,
 
     /// Progress for unzipping the downloaded files.
-    pub unzip: mpsc::Receiver<DependencyName>,
+    pub unzip: mpsc::UnboundedReceiver<DependencyName>,
 
     /// Progress for installing subdependencies.
-    pub subdependencies: mpsc::Receiver<DependencyName>,
+    pub subdependencies: mpsc::UnboundedReceiver<DependencyName>,
 
     /// Progress for checking the integrity of the installed dependencies.
-    pub integrity: mpsc::Receiver<DependencyName>,
+    pub integrity: mpsc::UnboundedReceiver<DependencyName>,
 }
 
 /// Collection of channels to notify the caller of the install progress.
 #[derive(Debug, Clone)]
 pub struct InstallProgress {
     /// Channel to send messages to be logged to the user.
-    pub logs: mpsc::Sender<String>,
+    pub logs: mpsc::UnboundedSender<String>,
 
     /// Progress for calls to the API to retrieve the packages versions.
-    pub versions: mpsc::Sender<DependencyName>,
+    pub versions: mpsc::UnboundedSender<DependencyName>,
 
     /// Progress for downloading the dependencies.
-    pub downloads: mpsc::Sender<DependencyName>,
+    pub downloads: mpsc::UnboundedSender<DependencyName>,
 
     /// Progress for unzipping the downloaded files.
-    pub unzip: mpsc::Sender<DependencyName>,
+    pub unzip: mpsc::UnboundedSender<DependencyName>,
 
     /// Progress for installing subdependencies.
-    pub subdependencies: mpsc::Sender<DependencyName>,
+    pub subdependencies: mpsc::UnboundedSender<DependencyName>,
 
     /// Progress for checking the integrity of the installed dependencies.
-    pub integrity: mpsc::Sender<DependencyName>,
+    pub integrity: mpsc::UnboundedSender<DependencyName>,
 }
 
 impl InstallProgress {
     /// Create a new install progress tracker, with a receiving half ([InstallMonitoring]) and a
     /// sending half ([InstallProgress]).
     pub fn new() -> (Self, InstallMonitoring) {
-        let (logs_tx, logs_rx) = mpsc::channel();
-        let (versions_tx, versions_rx) = mpsc::channel();
-        let (downloads_tx, downloads_rx) = mpsc::channel();
-        let (unzip_tx, unzip_rx) = mpsc::channel();
-        let (subdependencies_tx, subdependencies_rx) = mpsc::channel();
-        let (integrity_tx, integrity_rx) = mpsc::channel();
+        let (logs_tx, logs_rx) = mpsc::unbounded_channel();
+        let (versions_tx, versions_rx) = mpsc::unbounded_channel();
+        let (downloads_tx, downloads_rx) = mpsc::unbounded_channel();
+        let (unzip_tx, unzip_rx) = mpsc::unbounded_channel();
+        let (subdependencies_tx, subdependencies_rx) = mpsc::unbounded_channel();
+        let (integrity_tx, integrity_rx) = mpsc::unbounded_channel();
         (
             Self {
                 logs: logs_tx,
