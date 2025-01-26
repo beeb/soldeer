@@ -36,4 +36,5 @@ testdir.workspace = true
 [features]
 default = ["rustls"]
 rustls = ["soldeer-core/rustls"]
+default-tls = ["soldeer-core/default-tls"]
 serde = ["soldeer-core/serde"]

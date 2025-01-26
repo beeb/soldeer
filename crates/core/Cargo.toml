@@ -32,7 +32,14 @@ log = { workspace = true, features = ["kv_std"] }
 path-slash.workspace = true
 rayon.workspace = true
 regex = "1.10.5"
-reqwest = { workspace = true, features = ["json", "multipart", "stream"] }
+reqwest = { workspace = true, features = [
+    "http2",                      # default
+    "charset",                    # default
+    "macos-system-configuration", # default
+    "json",
+    "multipart",
+    "stream",
+] }
 sanitize-filename = "0.6.0"
 semver = "1.0.23"
 serde = { version = "1.0.204", features = ["derive"] }
@@ -56,4 +63,5 @@ testdir.workspace = true
 [features]
 default = ["rustls"]
 rustls = ["reqwest/rustls-tls"]
+default-tls = ["reqwest/default-tls"]
 serde = []
