@@ -4,7 +4,7 @@ use crate::{
     errors::DownloadError,
     utils::{path_matches, run_git_command, sanitize_filename},
 };
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 use reqwest::{IntoUrl, Url};
 use std::{
     fs,
@@ -26,7 +26,7 @@ pub async fn download_file(
     base_name: &str,
 ) -> Result<PathBuf> {
     let url: Url = url.into_url()?;
-    debug!(name = base_name, url:% = url; "downloading file");
+    info!(name = base_name, url:% = url; "downloading file");
     let resp = reqwest::get(url).await?;
     let mut resp = resp.error_for_status()?;
 
@@ -40,7 +40,7 @@ pub async fn download_file(
             .map_err(|e| DownloadError::IOError { path: zip_path.clone(), source: e })?;
     }
     file.flush().await.map_err(|e| DownloadError::IOError { path: zip_path.clone(), source: e })?;
-    debug!(path:? = zip_path; "saved downloaded file");
+    info!(path:? = zip_path; "saved downloaded file");
     Ok(zip_path)
 }
 
@@ -56,7 +56,7 @@ pub async fn unzip_file(path: impl AsRef<Path>, into: impl AsRef<Path>) -> Resul
         move || zip_extract::extract(Cursor::new(zip_contents), &out_dir, true)
     })
     .await??;
-    debug!(file:? = path, dest:? = into.as_ref(); "unzipped file");
+    info!(file:? = path, dest:? = into.as_ref(); "unzipped file");
 
     tokio::fs::remove_file(&path)
         .await
@@ -84,7 +84,7 @@ pub async fn clone_repo(
         None,
     )
     .await?;
-    debug!(repo:? = path; "git repo cloned");
+    info!(repo:? = path; "git repo cloned");
     if let Some(identifier) = identifier {
         run_git_command(&["checkout", &identifier.to_string()], Some(&path)).await?;
         debug!(ref:? = identifier, repo:? = path; "checked out ref");
