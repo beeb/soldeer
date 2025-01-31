@@ -11,7 +11,7 @@ use crate::{
     utils::{canonicalize, hash_file, hash_folder, run_forge_command, run_git_command},
 };
 use derive_more::derive::Display;
-use log::warn;
+use log::{debug, info, warn};
 use path_slash::PathBufExt as _;
 use std::{
     fmt,
@@ -266,6 +266,7 @@ pub async fn install_dependencies(
 ) -> Result<Vec<LockEntry>> {
     let mut set = JoinSet::new();
     for dep in dependencies {
+        debug!(dep:% = dep; "spawning task to install dependency");
         set.spawn({
             let d = dep.clone();
             let p = progress.clone();
@@ -287,8 +288,11 @@ pub async fn install_dependencies(
 
     let mut results = Vec::new();
     while let Some(res) = set.join_next().await {
-        results.push(res??);
+        let res = res??;
+        debug!(dep:% = res.name(); "install task finished");
+        results.push(res);
     }
+    debug!("all install tasks have finished");
     Ok(results)
 }
 
@@ -309,30 +313,32 @@ pub async fn install_dependency(
     progress: InstallProgress,
 ) -> Result<LockEntry> {
     if let Some(lock) = lock {
+        debug!(dep:% = dependency; "installing based on lock entry");
         match check_dependency_integrity(lock, &deps).await? {
             DependencyStatus::Installed => {
-                // no action needed, dependency is already installed and matches the lockfile
-                // entry
+                info!(dep:% = dependency; "skipped install, dependency already up-to-date with lockfile");
                 progress.update_all(dependency.into());
 
                 return Ok(lock.clone());
             }
             DependencyStatus::FailedIntegrity => match dependency {
                 Dependency::Http(_) => {
-                    // we know the folder exists because otherwise we would have gotten
-                    // `Missing`
+                    info!(dep:% = dependency; "dependency failed integrity check, reinstalling");
                     progress.log(format!(
                         "Dependency {dependency} failed integrity check, reinstalling"
                     ));
-
+                    // we know the folder exists because otherwise we would have gotten
+                    // `Missing`
                     delete_dependency_files(dependency, &deps).await?;
+                    debug!(dep:% = dependency; "removed dependency folder");
                     // we won't need to retrieve the version number so we mark it as done
                     progress.versions.send(dependency.into()).ok();
                 }
                 Dependency::Git(_) => {
+                    let commit = &lock.as_git().expect("lock entry should be of type git").rev;
+                    info!(dep:% = dependency, commit; "dependency failed integrity check, resetting to commit");
                     progress.log(format!(
-                        "Dependency {dependency} failed integrity check, resetting to commit {}",
-                        lock.as_git().expect("lock entry should be of type git").rev
+                        "Dependency {dependency} failed integrity check, resetting to commit {commit}"
                     ));
 
                     reset_git_dependency(
@@ -340,6 +346,7 @@ pub async fn install_dependency(
                         &deps,
                     )
                     .await?;
+                    debug!(dep:% = dependency; "reset git dependency");
                     // dependency should now be at the correct commit, we can exit
                     progress.update_all(dependency.into());
 
@@ -353,6 +360,7 @@ pub async fn install_dependency(
                         .await
                         .map_err(|e| InstallError::IOError { path, source: e })?;
                 }
+                info!(dep:% = dependency; "dependency is missing, installing");
                 // we won't need to retrieve the version number so we mark it as done
                 progress.versions.send(dependency.into()).ok();
             }
@@ -366,6 +374,7 @@ pub async fn install_dependency(
         .await
     } else {
         // no lockfile entry, install from config object
+        debug!(dep:% = dependency; "no lockfile entry, installing based on config");
         // make sure there is no existing directory for the dependency
         if let Some(path) = dependency.install_path(&deps).await {
             fs::remove_dir_all(&path)
@@ -386,6 +395,8 @@ pub async fn install_dependency(
                 (get_dependency_url_remote(dependency, &version).await?, version)
             }
         };
+        debug!(dep:% = dependency, version; "resolved version");
+        debug!(dep:% = dependency, url; "resolved download URL");
         // indicate that we have retrieved the version number
         progress.versions.send(dependency.into()).ok();
 
@@ -401,13 +412,9 @@ pub async fn install_dependency(
                 .build()
                 .into(),
         };
-        install_dependency_inner(
-            &info,
-            format_install_path(dependency.name(), &version, &deps),
-            recursive_deps,
-            progress,
-        )
-        .await
+        let install_path = format_install_path(dependency.name(), &version, &deps);
+        debug!(dep:% = dependency; "installing to path {install_path:?}");
+        install_dependency_inner(&info, install_path, recursive_deps, progress).await
     }
 }
 
@@ -431,6 +438,7 @@ pub async fn check_dependency_integrity(
 pub fn ensure_dependencies_dir(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();
     if !path.exists() {
+        debug!(path:? = path; "dependencies dir doesn't exist, creating it");
         std::fs::create_dir(path)
             .map_err(|e| InstallError::IOError { path: path.to_path_buf(), source: e })?;
     }
@@ -446,7 +454,6 @@ async fn install_dependency_inner(
 ) -> Result<LockEntry> {
     match dep {
         InstallInfo::Http(dep) => {
-            // download zip file into the dependencies directory, naming it after the dependency
             let path = path.as_ref();
             let zip_path = download_file(
                 &dep.url,
@@ -470,17 +477,23 @@ async fn install_dependency_inner(
                         actual: zip_integrity.to_string(),
                     });
                 }
+                debug!(zip_path:?; "archive integrity check successful");
+            } else {
+                debug!(zip_path:?; "no checksum available for archive integrity check");
             }
             unzip_file(&zip_path, path).await?;
             progress.unzip.send(dep.into()).ok();
 
             if subdependencies {
+                debug!(dep:% = dep; "installing subdependencies");
                 install_subdependencies(path).await?;
+                debug!(dep:% = dep; "finished installing subdependencies");
             }
             progress.subdependencies.send(dep.into()).ok();
 
             let integrity = hash_folder(path)
                 .map_err(|e| InstallError::IOError { path: path.to_path_buf(), source: e })?;
+            debug!(dep:% = dep, checksum = integrity.0; "integrity checksum computed");
             progress.integrity.send(dep.into()).ok();
 
             Ok(HttpLockEntry::builder()
@@ -499,7 +512,9 @@ async fn install_dependency_inner(
             progress.downloads.send(dep.into()).ok();
 
             if subdependencies {
+                debug!(dep:% = dep; "installing subdependencies");
                 install_subdependencies(&path).await?;
+                debug!(dep:% = dep; "finished installing subdependencies");
             }
             progress.unzip.send(dep.into()).ok();
             progress.subdependencies.send(dep.into()).ok();
@@ -551,7 +566,7 @@ async fn install_subdependencies(path: impl AsRef<Path>) -> Result<()> {
 
 /// Check the integrity of an HTTP dependency.
 ///
-/// THis function hashes the contents of the dependency directory and compares it with the lockfile
+/// This function hashes the contents of the dependency directory and compares it with the lockfile
 /// entry.
 async fn check_http_dependency(
     lock: &HttpLockEntry,
@@ -563,11 +578,12 @@ async fn check_http_dependency(
     }
     let current_hash = tokio::task::spawn_blocking({
         let path = path.clone();
-        move || hash_folder(path)
+        move || hash_folder(&path)
     })
     .await?
-    .map_err(|e| InstallError::IOError { path, source: e })?;
+    .map_err(|e| InstallError::IOError { path: path.to_path_buf(), source: e })?;
     if current_hash.to_string() != lock.integrity {
+        debug!(path:?, expected = lock.integrity, computed = current_hash.0; "integrity checksum mismatch");
         return Ok(DependencyStatus::FailedIntegrity);
     }
     Ok(DependencyStatus::Installed)
@@ -598,6 +614,7 @@ async fn check_git_dependency(
         }
         Err(_) => {
             // error getting the top level directory, assume the directory is not a git repository
+            debug!(path:?; "`git rev-parse --show-toplevel` failed");
             return Ok(DependencyStatus::Missing);
         }
     };
@@ -610,12 +627,16 @@ async fn check_git_dependency(
     if top_level.trim() != absolute_path.to_slash_lossy() {
         // the top level directory is not the install path, assume the directory is not a git
         // repository
+        debug!(path:?; "dependency's toplevel dir is outside of dependency folder: not a git repo");
         return Ok(DependencyStatus::Missing);
     }
     // for git dependencies, the `rev` field holds the commit hash
     match run_git_command(&["diff", "--exit-code", &lock.rev], Some(&path)).await {
         Ok(_) => Ok(DependencyStatus::Installed),
-        Err(_) => Ok(DependencyStatus::FailedIntegrity),
+        Err(_) => {
+            debug!(path:?, rev = lock.rev; "git repo has non-empty diff compared to lockfile rev");
+            Ok(DependencyStatus::FailedIntegrity)
+        }
     }
 }
 
