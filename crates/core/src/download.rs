@@ -53,7 +53,10 @@ pub async fn unzip_file(path: impl AsRef<Path>, into: impl AsRef<Path>) -> Resul
 
     tokio::task::spawn_blocking({
         let out_dir = into.as_ref().to_path_buf();
-        move || zip_extract::extract(Cursor::new(zip_contents), &out_dir, true)
+        move || {
+            let mut zip = zip::ZipArchive::new(Cursor::new(zip_contents))?;
+            zip.extract_unwrapped_root_dir(out_dir, zip::read::root_dir_common_filter)
+        }
     })
     .await??;
     debug!(file:? = path, dest:? = into.as_ref(); "unzipped file");
@@ -68,10 +71,10 @@ pub async fn unzip_file(path: impl AsRef<Path>, into: impl AsRef<Path>) -> Resul
 /// Clone a git repo into the given path, optionally checking out a reference.
 ///
 /// The repository is cloned without trees, which can speed up cloning when the full history is not
-/// needed. Contrary to a shallow clone, it's possible to checkout any ref and the missing trees
+/// needed. Contrary to a shallow clone, it's possible to check out any ref and the missing trees
 /// will be retrieved as they are needed.
 ///
-/// This function returns the commit hash corresponding to  the checked out reference (branch, tag,
+/// This function returns the commit hash corresponding to the checked out reference (branch, tag,
 /// commit).
 pub async fn clone_repo(
     url: &str,
@@ -98,7 +101,7 @@ pub async fn clone_repo(
 /// Remove the files for a dependency (synchronous).
 ///
 /// This function should only be called in sync contexts. For a version that is safe to run in
-/// multithreaded async contexts, see [`delete_dependency_files`].
+/// multi-threaded async contexts, see [`delete_dependency_files`].
 pub fn delete_dependency_files_sync(dependency: &Dependency, deps: impl AsRef<Path>) -> Result<()> {
     let Some(path) = find_install_path_sync(dependency, deps) else {
         return Err(DownloadError::DependencyNotFound(dependency.to_string()));
@@ -191,7 +194,7 @@ fn install_path_matches(dependency: &Dependency, path: impl AsRef<Path>) -> bool
 mod tests {
     use super::*;
     use crate::{config::HttpDependency, push::zip_file};
-    use std::fs;
+    use std::fs::{self, File};
     use testdir::testdir;
 
     #[tokio::test]

@@ -780,7 +780,7 @@ mod tests {
 
     async fn mock_api_server() -> ServerGuard {
         let mut server = Server::new_async().await;
-        let data = r#"{"data":[{"created_at":"2024-08-06T17:31:25.751079Z","deleted":false,"downloads":3389,"id":"660132e6-4902-4804-8c4b-7cae0a648054","internal_name":"forge-std/1_9_2_06-08-2024_17:31:25_forge-std-1.9.2.zip","project_id":"37adefe5-9bc6-4777-aaf2-e56277d1f30b","url":"https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_2_06-08-2024_17:31:25_forge-std-1.9.2.zip","version":"1.9.2"},{"created_at":"2024-07-03T14:44:59.729623Z","deleted":false,"downloads":5290,"id":"fa5160fc-ba7b-40fd-8e99-8becd6dadbe4","internal_name":"forge-std/v1_9_1_03-07-2024_14:44:59_forge-std-v1.9.1.zip","project_id":"37adefe5-9bc6-4777-aaf2-e56277d1f30b","url":"https://soldeer-revisions.s3.amazonaws.com/forge-std/v1_9_1_03-07-2024_14:44:59_forge-std-v1.9.1.zip","version":"1.9.1"},{"created_at":"2024-07-03T14:44:58.148723Z","deleted":false,"downloads":21,"id":"b463683a-c4b4-40bf-b707-1c4eb343c4d2","internal_name":"forge-std/v1_9_0_03-07-2024_14:44:57_forge-std-v1.9.0.zip","project_id":"37adefe5-9bc6-4777-aaf2-e56277d1f30b","url":"https://soldeer-revisions.s3.amazonaws.com/forge-std/v1_9_0_03-07-2024_14:44:57_forge-std-v1.9.0.zip","version":"1.9.0"}],"status":"success"}"#;
+        let data = r#"{"data":[{"created_at":"2025-04-28T15:55:08.864203Z","deleted":false,"downloads":6004,"id":"e4264b6b-13c3-41d4-8910-96a863705369","internal_name":"forge-std/1_9_7_28-04-2025_15:55:08_forge-std-1.9.zip","project_id":"37adefe5-9bc6-4777-aaf2-e56277d1f30b","url":"https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_7_28-04-2025_15:55:08_forge-std-1.9.zip","version":"1.9.7"},{"created_at":"2025-02-01T20:49:10.896691Z","deleted":false,"downloads":14583,"id":"afbc2b34-3305-46cf-a8c9-a8ad8babf623","internal_name":"forge-std/1_9_6_01-02-2025_20:49:10_forge-std-1.9.zip","project_id":"37adefe5-9bc6-4777-aaf2-e56277d1f30b","url":"https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_6_01-02-2025_20:49:10_forge-std-1.9.zip","version":"1.9.6"},{"created_at":"2024-12-21T15:04:05.851260Z","deleted":false,"downloads":7992,"id":"e2cc3025-49e6-4e6b-b802-ad1d2cbfe2e7","internal_name":"forge-std/1_9_5_21-12-2024_15:04:05_forge-std-1.9.zip","project_id":"37adefe5-9bc6-4777-aaf2-e56277d1f30b","url":"https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_5_21-12-2024_15:04:05_forge-std-1.9.zip","version":"1.9.5"}],"status":"success"}"#;
         server
             .mock("GET", "/api/v1/revision")
             .match_query(Matcher::Any)
@@ -788,7 +788,7 @@ mod tests {
             .with_body(data)
             .create_async()
             .await;
-        let data2 = r#"{"data":[{"created_at":"2024-08-06T17:31:25.751079Z","deleted":false,"downloads":3391,"id":"660132e6-4902-4804-8c4b-7cae0a648054","internal_name":"forge-std/1_9_2_06-08-2024_17:31:25_forge-std-1.9.2.zip","project_id":"37adefe5-9bc6-4777-aaf2-e56277d1f30b","url":"https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_2_06-08-2024_17:31:25_forge-std-1.9.2.zip","version":"1.9.2"}],"status":"success"}"#;
+        let data2 = r#"{"data":[{"created_at":"2025-04-28T15:55:08.864203Z","deleted":false,"downloads":6004,"id":"e4264b6b-13c3-41d4-8910-96a863705369","internal_name":"forge-std/1_9_7_28-04-2025_15:55:08_forge-std-1.9.zip","project_id":"37adefe5-9bc6-4777-aaf2-e56277d1f30b","url":"https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_7_28-04-2025_15:55:08_forge-std-1.9.zip","version":"1.9.7"}],"status":"success"}"#;
         server
             .mock("GET", "/api/v1/revision-cli")
             .match_query(Matcher::Any)
@@ -1022,7 +1022,7 @@ mod tests {
     async fn test_install_dependency_registry() {
         let server = mock_api_server().await;
         let dir = testdir!();
-        let dep = HttpDependency::builder().name("forge-std").version_req("1.9.2").build().into();
+        let dep = HttpDependency::builder().name("forge-std").version_req("1.9.7").build().into();
         let (progress, _) = InstallProgress::new();
         let res = async_with_vars(
             [("SOLDEER_API_URL", Some(server.url()))],
@@ -1034,10 +1034,10 @@ mod tests {
         assert_eq!(lock.name(), dep.name());
         assert_eq!(lock.version(), dep.version_req());
         let lock = lock.as_http().unwrap();
-        assert_eq!(&lock.url, "https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_2_06-08-2024_17:31:25_forge-std-1.9.2.zip");
+        assert_eq!(&lock.url, "https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_7_28-04-2025_15:55:08_forge-std-1.9.zip");
         assert_eq!(
             lock.checksum,
-            "20fd008c7c69b6c737cc0284469d1c76497107bc3e004d8381f6d8781cb27980"
+            "8d9e0a885fa8ee6429a4d344aeb6799119f6a94c7c4fe6f188df79b0dce294ba"
         );
         let hash = hash_folder(lock.install_path(&dir)).unwrap();
         assert_eq!(lock.integrity, hash.to_string());
@@ -1057,9 +1057,9 @@ mod tests {
         assert!(res.is_ok(), "{res:?}");
         let lock = res.unwrap();
         assert_eq!(lock.name(), dep.name());
-        assert_eq!(lock.version(), "1.9.2");
+        assert_eq!(lock.version(), "1.9.7");
         let lock = lock.as_http().unwrap();
-        assert_eq!(&lock.url, "https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_2_06-08-2024_17:31:25_forge-std-1.9.2.zip");
+        assert_eq!(&lock.url, "https://soldeer-revisions.s3.amazonaws.com/forge-std/1_9_7_28-04-2025_15:55:08_forge-std-1.9.zip");
         let hash = hash_folder(lock.install_path(&dir)).unwrap();
         assert_eq!(lock.integrity, hash.to_string());
     }
